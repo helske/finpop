@@ -11,24 +11,25 @@ check_hmc_diagnostics(fit)
 mu <- cbind(Year = 1647:1850,
   rbind(summary(fit,"mu_1647")[[1]][,c("2.5%","mean","97.5%", "se_mean", "n_eff", "Rhat")],
     summary(fit,"mu")[[1]][,c("2.5%","mean","97.5%", "se_mean","n_eff", "Rhat")]))
-write.csv(mu,file="../final/mu.csv")
+write.csv(mu,file="mu.csv")
 
-#sigma_rw, rate_d, rate_mu. _sigma_pop_!!
+#sigma_rw, rate_bd, rate_mu. _sigma_pop_!!
 print(fit, pars=c(
   "sigma_drift_b", "sigma_drift_d", "sigma_rw_b", "sigma_rw_d",
-  "rate_b", "rate_d", "rate_mu", "sigma_pop",
+  "rate_bd", "rate_mu", "sigma_pop",
   "mu_1647", "famine", "famine_ratio", 
   "famine_correction",
-  "r_b", "r_d", "mid_b", "mid_d",
-  "l1_b", "l1_d",  "lambda_n"))
+  "r_b", "r_d", "m_b", "m_d",
+  "lc", "lambda_b[1]", "lambda_d[1]", "lambda_n"))
 
-
-sim <- extract(fit, pars=c(
+monitor(extract(fit, pars=c(
   "sigma_drift_b", "sigma_drift_d", "sigma_rw_b", "sigma_rw_d",
-  "rate_b", "rate_d", "rate_mu", "sigma_pop",
+  "rate_bd", "rate_mu", "sigma_pop",
   "mu_1647", "famine", "famine_ratio", 
   "famine_correction",
-  "r_b", "r_d", "l1_b", "l1_d",  "lambda_n"))
+  "r_b", "r_d", "m_b", "m_d",
+  "lc", "lambda_b[1]", "lambda_d[1]", "lambda_n"), permuted = FALSE), warmup = 0)
+
 
 tail(sort(summary(fit)[[1]][, c("Rhat")]),15)
 head(sort(summary(fit)[[1]][, c("n_eff")]),15)
@@ -68,9 +69,12 @@ dev.off()
 
 
 ## Fig2
+
+
 N <- 1000
-rate_b <- extract(fit, "rate_b")[[1]][1:N]
-rate_d <- extract(fit, "rate_d")[[1]][1:N]
+erw_b <- exp(extract(fit, "rw_b")[[1]][1:N,,])
+erw_d <- exp(extract(fit, "rw_d")[[1]][1:N,,])
+rate_bd <- extract(fit, "rate_bd")[[1]][1:N]
 l_b <- extract(fit, "lambda_b")[[1]][1:N,]
 l_d <- extract(fit, "lambda_d")[[1]][1:N,]
 fbd <- exp(extract(fit, "famine")[[1]][1:N])
@@ -78,53 +82,29 @@ fr <- extract(fit, "famine_ratio")[[1]][1:N]
 rate_mu <- extract(fit, "rate_mu")[[1]][1:N]
 m0 <- extract(fit, "mu_1647")[[1]][1:N]
 sigma_pop <- extract(fit, "sigma_pop")[[1]][1:N]
-rw_b1 <- extract(fit, "rw_b")[[1]][1:N,,1]
-rw_d1 <- extract(fit, "rw_d")[[1]][1:N,,1]
-d_b1 <- extract(fit, "drift_b")[[1]][1:N,1]
-d_d1 <- extract(fit, "drift_d")[[1]][1:N,1]
-sigma_rw_b <- extract(fit, "sigma_rw_b")[[1]][1:N]
-sigma_rw_d <- extract(fit, "sigma_rw_d")[[1]][1:N]
-sigma_drift_b <- extract(fit, "sigma_drift_b")[[1]][1:N]
-sigma_drift_d <- extract(fit, "sigma_drift_d")[[1]][1:N]
 n <- 203
 yrep <- matrix(NA, n+1, N)
 brep <- matrix(NA, n, N)
 drep <- matrix(NA, n, N)
 mrep <- matrix(NA, n+1, N)
 fcrep <- rep(NA, N)
-p<-177
-rwb_rep <- array(NA, c(n, p, N))
-rwd_rep <- array(NA, c(n, p, N))
-db_rep <- matrix(NA, n, N)
-dd_rep <- matrix(NA, n, N)
 for(i in 1:ncol(yrep)) {
-  rwb_rep[1,,i] <- rw_b1[i,]
-  rwd_rep[1,,i] <- rw_d1[i,]
-  db_rep[1,i] <- d_b1[i]
-  dd_rep[1,i] <- d_d1[i]
-  for(t in 2:n) {
-    db_rep[t,i] <- rnorm(1,db_rep[t-1, i], sigma_drift_b[i])
-    dd_rep[t,i]  <- rnorm(1,dd_rep[t-1, i], sigma_drift_d[i])
-    rwb_rep[t, , i] <- rnorm(1,db_rep[t,i] + rwb_rep[t - 1, , i], sigma_rw_b[i]);
-    rwd_rep[t, , i]  <- rnorm(1,dd_rep[t,i] + rwd_rep[t - 1, , i], sigma_rw_d[i]);
-  }
-  
-  brep[, i] <- rgamma(n, rate_b[i] * rowSums(exp(rwb_rep[,,i])), rate_b[i])/l_b[i,]
-  drep[-50, i] <- rgamma(n-1, rate_d[i] * rowSums(exp(rwd_rep[-50,,i])), rate_d[i])
-  drep[50, i] <- rgamma(1, rate_d[i] * sum(fbd[i]*exp(rwd_rep[50,,i])), rate_d[i])
+  brep[, i] <- rgamma(n, rate_bd[i] * colSums(erw_b[i,,]), rate_bd[i])/l_b[i,]
+  drep[-50, i] <- rgamma(n-1, rate_bd[i] * colSums(erw_d[i,,-50]), rate_bd[i])
+  drep[50, i] <- rgamma(1, rate_bd[i] * sum(fbd[i]*erw_d[i,,50]), rate_bd[i])
   drep[, i] <- drep[, i] / l_d[i,]
   mrep[1, i] <- rgamma(1, rate_mu[i] * (m0[i] + brep[1,i] - drep[1,i] - soldiers[1]), 
-    rate_mu[i])
+                       rate_mu[i])
   for(t in 2:50) { #1648-1696
     mrep[t,i] <- rgamma(1, rate_mu[i] * (mrep[t-1,i] + brep[t-1,i] - 
-        drep[t-1,i] - soldiers[t-1]), rate_mu[i]);
+                                           drep[t-1,i] - soldiers[t-1]), rate_mu[i]);
   }
   fcrep[i] <- (mrep[50,i] + brep[50,i] - soldiers[50] - fr[i] * mrep[49,i]) / drep[50,i]
   mrep[51,i] <- rgamma(1, rate_mu[i] * (mrep[50,i] + brep[50,i] - drep[50,i] * 
-      fcrep[i] - soldiers[50]), rate_mu[i]);
+                                          fcrep[i] - soldiers[50]), rate_mu[i]);
   for(t in 52:(n+1)) { #1648-1696
     mrep[t,i] <- rgamma(1, rate_mu[i] * (mrep[t-1,i] + brep[t-1,i] - 
-        drep[t-1,i] - soldiers[t-1]), rate_mu[i]);
+                                           drep[t-1,i] - soldiers[t-1]), rate_mu[i]);
   }
   yrep[, i] <- rnorm(n+1, mrep[, i], sigma_pop[i])
 }
@@ -133,28 +113,27 @@ summary(fcrep)
 mean(colSums(is.na(yrep))>0)*100
 yrep[is.na(yrep)] <- 0
 
-tabellverket <- c(1749, 1751, 1754, 1757, 1760, 1763, 1766, 1769, 1772, 1775, 1780, seq(1800,1830, by = 5), 1831:1850)
+tabellverket <- c(1749, 1751, 1754, 1757, 1760, 1763, 1766, 1769, 1772, 1775, 1780, seq(1800, 1850, by = 5))
 pop_prior[!(time(pop_prior) %in% tabellverket)] <- NA
 
-
+library(ggplot2)
+library(ggthemes)
+library(scales)
+library(patchwork)
+library(extrafont)
 #font_import(paths = NULL, recursive = TRUE, prompt = TRUE,pattern = NULL)
 loadfonts()
 bold_text <- element_text(face = "bold")
 text <- element_text(size = 12)
 df0 <- data.frame(census = c(NA,pop_prior), time = 1647:1850)
 df <- data.frame(population = c(yrep), time = 1647:1850, replication = rep(1:N, each = n+1))
-p <- ggplot(df, aes(x = time, y = population)) + 
+ggplot(df, aes(x = time, y = population)) + 
   geom_line(aes(colour = "Posterior predictive sample",group = replication), alpha=0.03) +
   geom_point(data=df0, aes(x = time, y = census, colour = "Census")) +
   scale_y_continuous("Population",labels=comma) + scale_x_continuous("Year") + theme_bw() +
   scale_colour_few() + theme(legend.title=element_blank(), text=text, axis.title=bold_text) + 
   theme(legend.position=c(0.9, 0.1)) 
 
-
-svg("Fig2.svg", width = 6,height=4)
-p
-dev.off()
-####
 
 
 db <- exp(extract(fit,pars=c("drift_b"))[[1]])
@@ -196,13 +175,12 @@ svg("../final/Fig3.svg", width = 6,height=4)
 p
 dev.off()
 
-tabellverket <- c(1749, 1751, 1754, 1757, 1760, 1763, 1766, 1769, 1772, 1775, 1780, seq(1800,1830, by = 5), 1831:1850)
 pop_prior[!(time(pop_prior) %in% tabellverket)] <- NA
 mu <- rbind(
   summary(fit,"mu_1647")[[1]][,c("2.5%","mean","97.5%")],
   summary(fit,"mu")[[1]][,c("2.5%","mean","97.5%")])
 
-prior <- readxl::read_xlsx("../revision2019/Aiemmat estimaatit.xlsx")[[2]]
+prior <- readxl::read_xlsx("Aiemmat estimaatit.xlsx")[[2]]
 pop_data <- data.frame(Year = 1647:1850, 
   Census = c(NA, pop_prior), 
   #Literature = c(rep(NA, 43), prior),
