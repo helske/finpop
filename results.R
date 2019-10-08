@@ -1,51 +1,48 @@
+library(rstan)
+library(ggplot2)
+library(ggthemes)
+library(patchwork) # needs to be installed from github: thomasp85/patchwork
+library(extrafont)
+library(scales)
+library(readxl)
+library(dplyr)
 
+fit <- readRDS("fit_population_model.rds")
 source("benchmark_data.R")
 obs_births <- readRDS("births_by_parish.rda")
 obs_deaths <- readRDS("deaths_by_parish.rda")
 
-library(rstan)
-fit <- readRDS("fit_final.rds")
-get_stanmodel(fit)
-check_hmc_diagnostics(fit)
+
+font_import(paths = NULL, recursive = TRUE, prompt = FALSE,pattern = NULL)
+loadfonts()
+bold_text <- element_text(face = "bold")
+text <- element_text(size = 12)
+
 
 mu <- cbind(Year = 1647:1850,
-  rbind(summary(fit,"mu_1647")[[1]][,c("2.5%","mean","97.5%", "se_mean", "n_eff", "Rhat")],
-    summary(fit,"mu")[[1]][,c("2.5%","mean","97.5%", "se_mean","n_eff", "Rhat")]))
+  rbind(summary(fit,"mu_1647", use_cache = FALSE)[[1]][,c("2.5%","mean","97.5%", "se_mean", "n_eff", "Rhat")],
+    summary(fit,"mu", use_cache = FALSE)[[1]][,c("2.5%","mean","97.5%", "se_mean","n_eff", "Rhat")]))
 write.csv(mu,file="mu.csv")
 
-#sigma_rw, rate_bd, rate_mu. _sigma_pop_!!
-print(fit, pars=c(
-  "sigma_drift_b", "sigma_drift_d", "sigma_rw_b", "sigma_rw_d",
-  "rate_bd", "rate_mu", "sigma_pop",
-  "mu_1647", "famine", "famine_ratio", 
-  "famine_correction",
-  "r_b", "r_d", "m_b", "m_d",
-  "lc", "lambda_b[1]", "lambda_d[1]", "lambda_n"))
 
-monitor(extract(fit, pars=c(
+theta_monitor <- monitor(sims <- extract(fit, pars=c(
   "sigma_drift_b", "sigma_drift_d", "sigma_rw_b", "sigma_rw_d",
   "rate_bd", "rate_mu", "sigma_pop",
   "mu_1647", "famine", "famine_ratio", 
   "famine_correction",
   "r_b", "r_d", "m_b", "m_d",
   "lc", "lambda_b[1]", "lambda_d[1]", "lambda_n"), permuted = FALSE), warmup = 0)
+saveRDS(theta_monitor, file = "theta_monitor.rds")
+saveRDS(sims, file = "sims.rds")
 
+mu <- extract(fit, c("mu_1647", "mu"), permuted = FALSE)
+mu_monitor <- monitor(mu, warmup = 0)
+saveRDS(mu_monitor, file = "mu_monitor.rds")
 
-tail(sort(summary(fit)[[1]][, c("Rhat")]),15)
-head(sort(summary(fit)[[1]][, c("n_eff")]),15)
+mu <- extract(fit, c("mu_1647", "mu"))
+saveRDS(mu, file = "mu.rds")
 
 n <- 203
-
-library(ggplot2)
-library(ggthemes)
-library(patchwork)
-library(extrafont)
-library(scales)
-
-#font_import(paths = NULL, recursive = TRUE, prompt = TRUE,pattern = NULL)
-loadfonts()
-bold_text <- element_text(face = "bold")
-text <- element_text(size = 12)
 
 parish_data <- data.frame(Year = 1648:1850, Count = 
     c(rowSums(obs_births, na.rm=TRUE), rowSums(obs_deaths, na.rm=TRUE)),
@@ -63,13 +60,13 @@ p2 <- ggplot(parish_data, aes(Year, Count, group = Series, color = Series)) +
   scale_colour_few() + theme(text=text, axis.title=bold_text) +
   theme(legend.title=element_blank(),legend.position=c(0.85, 0.14))
 
-svg("Fig1.svg", width = 8.4,height=4)
+svg("Fig1.svg", width = 16, height = 8)
 p1 + p2
 dev.off()
 
-
 ## Fig2
-
+tabellverket <- c(1749, 1751, 1754, 1757, 1760, 1763, 1766, 1769, 1772, 1775, 1780, seq(1800, 1850, by = 5))
+pop_prior[!(time(pop_prior) %in% tabellverket)] <- NA
 
 N <- 1000
 erw_b <- exp(extract(fit, "rw_b")[[1]][1:N,,])
@@ -88,80 +85,63 @@ brep <- matrix(NA, n, N)
 drep <- matrix(NA, n, N)
 mrep <- matrix(NA, n+1, N)
 fcrep <- rep(NA, N)
+set.seed(1)
 for(i in 1:ncol(yrep)) {
   brep[, i] <- rgamma(n, rate_bd[i] * colSums(erw_b[i,,]), rate_bd[i])/l_b[i,]
   drep[-50, i] <- rgamma(n-1, rate_bd[i] * colSums(erw_d[i,,-50]), rate_bd[i])
   drep[50, i] <- rgamma(1, rate_bd[i] * sum(fbd[i]*erw_d[i,,50]), rate_bd[i])
   drep[, i] <- drep[, i] / l_d[i,]
-  mrep[1, i] <- rgamma(1, rate_mu[i] * (m0[i] + brep[1,i] - drep[1,i] - soldiers[1]), 
+  mrep[1, i] <- rgamma(1, rate_mu[i] * (m0[i] + brep[1,i] - drep[1,i] - soldiers[1]),
                        rate_mu[i])
   for(t in 2:50) { #1648-1696
-    mrep[t,i] <- rgamma(1, rate_mu[i] * (mrep[t-1,i] + brep[t-1,i] - 
+    mrep[t,i] <- rgamma(1, rate_mu[i] * (mrep[t-1,i] + brep[t-1,i] -
                                            drep[t-1,i] - soldiers[t-1]), rate_mu[i]);
   }
   fcrep[i] <- (mrep[50,i] + brep[50,i] - soldiers[50] - fr[i] * mrep[49,i]) / drep[50,i]
-  mrep[51,i] <- rgamma(1, rate_mu[i] * (mrep[50,i] + brep[50,i] - drep[50,i] * 
+  mrep[51,i] <- rgamma(1, rate_mu[i] * (mrep[50,i] + brep[50,i] - drep[50,i] *
                                           fcrep[i] - soldiers[50]), rate_mu[i]);
   for(t in 52:(n+1)) { #1648-1696
-    mrep[t,i] <- rgamma(1, rate_mu[i] * (mrep[t-1,i] + brep[t-1,i] - 
+    mrep[t,i] <- rgamma(1, rate_mu[i] * (mrep[t-1,i] + brep[t-1,i] -
                                            drep[t-1,i] - soldiers[t-1]), rate_mu[i]);
   }
   yrep[, i] <- rnorm(n+1, mrep[, i], sigma_pop[i])
 }
 
-summary(fcrep)
-mean(colSums(is.na(yrep))>0)*100
-yrep[is.na(yrep)] <- 0
+save(erw_b,
+     erw_d,
+     rate_bd,
+     l_b,
+     l_d,
+     fbd,
+     fr,
+     rate_mu,
+     m0,
+     sigma_pop,
+     yrep,
+     brep,
+     drep,
+     mrep,
+     fcrep, file = "ppcheck.rds") # Note this file is too big for Github
 
-tabellverket <- c(1749, 1751, 1754, 1757, 1760, 1763, 1766, 1769, 1772, 1775, 1780, seq(1800, 1850, by = 5))
-pop_prior[!(time(pop_prior) %in% tabellverket)] <- NA
-
-library(ggplot2)
-library(ggthemes)
-library(scales)
-library(patchwork)
-library(extrafont)
-#font_import(paths = NULL, recursive = TRUE, prompt = TRUE,pattern = NULL)
-loadfonts()
-bold_text <- element_text(face = "bold")
-text <- element_text(size = 12)
 df0 <- data.frame(census = c(NA,pop_prior), time = 1647:1850)
 df <- data.frame(population = c(yrep), time = 1647:1850, replication = rep(1:N, each = n+1))
-ggplot(df, aes(x = time, y = population)) + 
+p <- ggplot(df, aes(x = time, y = population)) +
   geom_line(aes(colour = "Posterior predictive sample",group = replication), alpha=0.03) +
   geom_point(data=df0, aes(x = time, y = census, colour = "Census")) +
   scale_y_continuous("Population",labels=comma) + scale_x_continuous("Year") + theme_bw() +
-  scale_colour_few() + theme(legend.title=element_blank(), text=text, axis.title=bold_text) + 
-  theme(legend.position=c(0.9, 0.1)) 
+  scale_colour_few() + theme(legend.title=element_blank(), text=text, axis.title=bold_text) +
+  theme(legend.position=c(0.9, 0.1))
 
-
-
-db <- exp(extract(fit,pars=c("drift_b"))[[1]])
-dd <- exp(extract(fit,pars=c("drift_d"))[[1]])
-
-drift_data <- data.frame(
-  Year = 1648:1850, 
-  Series = rep(c("Births", "Deaths"), each = n),
-  Value = c(colMeans(db), colMeans(dd)), 
-  lwr = c(apply(db,2,quantile,0.025), apply(dd,2,quantile,0.025)),
-  upr = c(apply(db,2,quantile,0.975), apply(dd,2,quantile,0.975)))
-
-p <- ggplot(drift_data, aes(x = Year, y = Value, colour = Series)) + 
-  geom_line() +
-  geom_line(aes(y=lwr, colour = Series), linetype = "dashed") + 
-  geom_line(aes(y=upr, colour = Series), linetype = "dashed") +
-  scale_y_continuous("Growth rate") + scale_x_continuous("Year") + theme_bw() +
-  scale_colour_few() + theme(legend.title=element_blank(), text=text, axis.title=bold_text) + 
-  theme(legend.position=c(0.88, 0.16)) + facet_wrap(~Series)
-
-library(rstan)
+svg("Fig2.svg", width = 16, height = 8)
+p
+dev.off()
 
 lambda_data <- data.frame(
   Year = 1648:1850, 
   Lambda = rep(c("Births", "Deaths"), each = n),
-  Value = summary(fit,pars=c("lambda_b", "lambda_d"))[[1]][,"mean"], 
-  lwr = summary(fit,pars=c("lambda_b", "lambda_d"))[[1]][,"2.5%"],
-  upr = summary(fit,pars=c("lambda_b", "lambda_d"))[[1]][,"97.5%"])
+  Value = summary(fit,pars=c("lambda_b", "lambda_d"), use_cache = FALSE)[[1]][,"mean"], 
+  lwr = summary(fit,pars=c("lambda_b", "lambda_d"), use_cache = FALSE)[[1]][,"2.5%"],
+  upr = summary(fit,pars=c("lambda_b", "lambda_d"), use_cache = FALSE)[[1]][,"97.5%"])
 
 p <- ggplot(lambda_data, aes(x = Year, y = Value, colour = Lambda)) + 
   geom_line() +
@@ -171,29 +151,27 @@ p <- ggplot(lambda_data, aes(x = Year, y = Value, colour = Lambda)) +
   scale_colour_few() + theme(legend.title=element_blank(), text=text, axis.title=bold_text) + 
   theme(legend.position=c(0.88, 0.16)) 
 
-svg("../final/Fig3.svg", width = 6,height=4)
+svg("Fig3.svg",width = 16, height = 8)
 p
 dev.off()
 
-pop_prior[!(time(pop_prior) %in% tabellverket)] <- NA
-mu <- rbind(
-  summary(fit,"mu_1647")[[1]][,c("2.5%","mean","97.5%")],
-  summary(fit,"mu")[[1]][,c("2.5%","mean","97.5%")])
+lambda_monitor <- monitor(extract(fit, c("lambda_b", "lambda_d"), permuted = FALSE), warmup = 0)
+saveRDS(lambda_monitor, file = "lambda_monitor.rds")
 
-prior <- readxl::read_xlsx("Aiemmat estimaatit.xlsx")[[2]]
+musum <- rbind(
+  summary(fit,"mu_1647", use_cache = FALSE)[[1]][,c("2.5%","mean","97.5%")],
+  summary(fit,"mu", use_cache = FALSE)[[1]][,c("2.5%","mean","97.5%")])
+
 pop_data <- data.frame(Year = 1647:1850, 
   Census = c(NA, pop_prior), 
-  #Literature = c(rep(NA, 43), prior),
-  Mean = mu[,"mean"],
-  lwr = mu[,"2.5%"],
-  upr = mu[,"97.5%"])
-library(scales)
+  Mean = musum[,"mean"],
+  lwr = musum[,"2.5%"],
+  upr = musum[,"97.5%"])
 p1 <- ggplot(pop_data[pop_data$Year <= 1750,], aes(x = Year)) + 
   geom_point(aes(y = Census, colour = "Census")) +
   geom_line(aes(y = Mean, colour = "This study")) +
   geom_line(aes(y = lwr, colour = "This study"), linetype = "dashed") + 
   geom_line(aes(y = upr, colour = "This study"), linetype = "dashed") +
- # geom_line(aes(y = Literature, colour = "Earlier literature")) +
   scale_y_continuous("Population",labels=comma) + scale_x_continuous("Year") + theme_bw() +
   scale_colour_few() + theme(legend.title=element_blank(), text=text, axis.title=bold_text) + 
   theme(legend.position=c(0.85, 0.1)) 
@@ -208,56 +186,136 @@ p2 <- ggplot(pop_data, aes(x = Year)) +
   geom_line(aes(y = Mean, colour = "This study")) +
   geom_line(aes(y = lwr, colour = "This study"), linetype = "dashed") + 
   geom_line(aes(y = upr, colour = "This study"), linetype = "dashed") +
- # geom_line(aes(y = Literature, colour = "Earlier literature")) +
   scale_y_continuous(NULL,labels=comma) + scale_x_continuous("Year") + theme_bw() +
   scale_colour_few() + theme(legend.title=element_blank(), text=text, axis.title=bold_text) + 
   theme(legend.position=c(0.85, 0.1)) 
 
 
 p <- p1 + p2 + plot_layout(ncol=2)
-ggsave(p, file = "Fig4.svg", width = 10,height=5)
+svg("Fig4.svg",width = 16, height = 8)
+p
+dev.off()
 
 ###
 
-b <- extract(fit, "births", permuted = FALSE)
-d <- extract(fit, "deaths", permuted = FALSE)
+mu <- cbind(extract(fit, "mu_1647")$mu, extract(fit, "mu")$mu)
 
-difference <- b - d
+difference <- apply(mu, 1, diff)
 
 diff_data <- data.frame(Year = 1648:1850, 
-  Prior = rowSums(obs_births,na.rm=TRUE) - rowSums(obs_deaths,na.rm=TRUE), 
-  Mean = apply(difference, 3, mean),
-  lwr = apply(difference, 3, quantile, 0.025),
-  upr = apply(difference, 3, quantile, 0.975))
+  Prior = rowSums(obs_births,na.rm=TRUE) - rowSums(obs_deaths,na.rm=TRUE) - soldiers, 
+  Mean = apply(difference, 1, mean),
+  lwr = apply(difference, 1, quantile, 0.025),
+  upr = apply(difference, 1, quantile, 0.975))
 
 p <- ggplot(diff_data, aes(x = Year)) + 
   geom_line(aes(y = Prior, colour = "Parish records")) +
   geom_line(aes(y = Mean, colour = "This study")) +
   geom_line(aes(y = lwr, colour = "This study"), linetype = "dashed") + 
   geom_line(aes(y = upr, colour = "This study"), linetype = "dashed") +
-  scale_y_continuous("Yearly difference in births and deaths", label=comma) + scale_x_continuous("Year") + theme_bw() +
+  scale_y_continuous("Yearly difference in population", label=comma) + scale_x_continuous("Year") + theme_bw() +
   scale_colour_few() + theme(legend.title=element_blank(), text=text, axis.title=bold_text) + 
   theme(legend.position=c(0.88, 0.16)) 
 
 
-svg("Fig5.svg", width = 8.4,height=4)
+svg("Fig5.svg",width = 16, height = 8)
 p
 dev.off()
 
 
 ###
-m <- summary(fit,pars="mu")[[1]][,"mean"]
-pop_data <- data.frame(Year = 1649:1850, 
-  Prior = diff(pop_prior)/pop_prior[-n]*100, 
-  Mean = diff(m)/m[-n]*100)
 
-p <- ggplot(pop_data, aes(x = Year)) + 
-  geom_line(aes(y = Prior, colour = "Reference")) +
-  geom_line(aes(y = Mean, colour = "This study"))+
+prior <- readxl::read_xlsx("Aiemmat estimaatit.xlsx")[[2]]
+pop_data <- data.frame(Year = 1647:1850, 
+                       Census = c(NA, pop_prior), 
+                       Literature = c(rep(NA, 43), prior),
+                       Mean = musum[,"mean"],
+                       lwr = musum[,"2.5%"],
+                       upr = musum[,"97.5%"])
+cols <-few_pal("Medium")(3)
+names(cols) <- c("Census", "This study", "Earlier literature")
+p1 <- ggplot(pop_data, aes(x = Year)) + 
+  geom_point(aes(y = Census, colour = "Census")) +
+  geom_line(aes(y = Mean, colour = "This study")) +
+  geom_line(aes(y = lwr, colour = "This study"), linetype = "dashed") + 
+  geom_line(aes(y = upr, colour = "This study"), linetype = "dashed") +
+  geom_line(aes(y = Literature, colour = "Earlier literature")) +
+  scale_y_continuous("Population",labels=comma) + scale_x_continuous("Year") + theme_bw() +
+  scale_colour_manual(values = cols) + 
+  theme(legend.title=element_blank(), text=text, axis.title=bold_text) + 
+  theme(legend.position=c(0.85, 0.1)) 
+
+xlim <- ggplot_build(p1)$layout$panel_params[[1]]$x.range
+ylim <- ggplot_build(p1)$layout$panel_params[[1]]$y.range
+
+
+pop_data <- data.frame(Year = 1648:1850, 
+  Prior = c(rep(NA, 43), diff(prior)/prior[-length(prior)]*100), 
+  Mean = rowMeans(difference/t(mu[,-(n+1)]))*100,
+  lwr = apply(difference/t(mu[,-(n+1)])*100,1,quantile, 0.025),
+  upr = apply(difference/t(mu[,-(n+1)])*100,1,quantile, 0.975))
+
+p2 <- ggplot(pop_data, aes(x = Year)) + 
+  geom_line(aes(y = Prior, colour = "Earlier literature")) +
+  geom_line(aes(y = Mean, colour = "This study")) +
+  geom_line(aes(y = lwr, colour = "This study"), linetype = "dashed") + 
+  geom_line(aes(y = upr, colour = "This study"), linetype = "dashed") +
   scale_y_continuous("Growth rate") + scale_x_continuous("Year") + theme_bw() +
-  scale_colour_few() + theme(legend.title=element_blank(), text=text, axis.title=bold_text) + 
+  coord_cartesian(ylim = c(-22, 4)) +
+  scale_colour_manual(values = cols) + 
+  theme(legend.title=element_blank(), text=text, axis.title=bold_text) + 
   theme(legend.position=c(0.88, 0.16)) 
-svg("paper/Fig6.svg", width = 6,height=4)
+
+svg("Fig6.svg", width = 16, height = 8)
+p1 + p2
+dev.off()
+
+
+mu <- readRDS("mu.rds")
+idx <- sample(1:nrow(mu[[1]]), size = 1000)
+
+mu_sample <- ts(t(cbind(mu$mu_1647[idx], mu$mu[idx,])), start = 1647)
+growth_rates <- colMeans(apply(window(mu_sample, end = 1690), 2, function(x) 100 * diff(x) / x[-length(x)]))
+
+rates <- dplyr::case_when(
+  growth_rates < 0 ~ "Negative growth",
+  growth_rates > 0 & growth_rates < 0.5 ~ "Slow growth",
+  growth_rates > 0.5 ~ "Fast growth")
+
+df <- data.frame(population = c(mu_sample[1:44, ]), 
+                 time = 1647:1690, replication = rep(1:ncol(mu_sample), each = 44),
+                 growth = 
+                   rep(factor(rates, levels = c("Fast growth", "Slow growth", "Negative growth"), 
+                              ordered = TRUE), each = 44))
+
+mu <- ts(t(cbind(mu$mu_1647, mu$mu)), start = 1647)
+growth_rates <- colMeans(apply(window(mu, end = 1690), 2, function(x) 100 * diff(x) / x[-length(x)]))
+negative_growth <- which(growth_rates < 0)
+slow_growth <- which(growth_rates > 0 & growth_rates < 0.5)
+fast_growth <- which(growth_rates > 0.5)
+sink("growth.txt")
+prop.table(table(dplyr::case_when(
+  growth_rates < 0 ~ "negative growth",
+  growth_rates > 0 & growth_rates < 0.5 ~ "slow growth",
+  growth_rates > 0.5 ~ "fast growth"))) * 100
+sink()
+means <- data.frame(population = c(rowMeans(mu[1:44,negative_growth]), 
+                                   rowMeans(mu[1:44,slow_growth]),
+                                   rowMeans(mu[1:44,fast_growth])),
+                    time = 1647:1690, replication = rep(1:3, each = 44),
+                    growth = rep(factor(c("Negative growth", "Slow growth", "Fast growth")), each = 44))
+
+cols <-few_pal("Medium")(3)
+names(cols) <- c("Fast growth", "Slow growth", "Negative growth")
+
+p <-ggplot(df, aes(x = time, y = population, colour = growth, group = replication)) + 
+  geom_line(alpha=0.25) + geom_line(data = means, size = 2) + 
+  scale_y_continuous("Population",labels = comma) + scale_x_continuous("Year") + theme_bw() +
+  scale_colour_manual(values = cols, name = "Growth rate") + theme(text=text, axis.title=bold_text) + 
+  theme(legend.position=c(0.1, 0.85)) 
+
+svg("Fig7.svg", width = 16, height = 8)
 p
 dev.off()
+
 
