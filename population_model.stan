@@ -277,7 +277,7 @@ model {
   mu[2:49] ~ gamma(rate_mu * (mu[1:48] + births[2:49] - deaths[2:49] - soldiers[2:49]), rate_mu);
   mu[50] ~ gamma(rate_mu * famine_ratio * mu[48], rate_mu);
   mu[51:n] ~ gamma(rate_mu * (mu[50:(n-1)] + births[51:n] - deaths[51:n] - soldiers[51:n]), rate_mu);
-  sigma_pop  ~ gamma(5, 0.001);
+  sigma_pop  ~ gamma(5, 0.005);
   data_obs_pop ~ normal(mu[i_obs_pop], sigma_pop);
 }
 
