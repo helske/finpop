@@ -334,4 +334,14 @@ round(c(mean = mean(x), quantile(x, c(0.025, 0.5, 0.975))))
 x <- apply(mu[, 54:75], 1, function(x) 1699 + c(which.min(x), which.max(x)))
 rbind(mean = rowMeans(x), apply(x,1,quantile, prob= c(0.025,0.5, 0.975)))
 
+
+x <- apply(mu[, 54:75], 1, function(x) c(which.min(x)- which.max(x)))
+c(mean = mean(x), quantile(x, prob= c(0.025,0.5, 0.975)))
+mean(x < 0)*100
+c(mean = mean(abs(x)), quantile(abs(x), prob= c(0.025,0.5, 0.975)))
+#hist(x,breaks=100)
+#ts.plot(ts(t(mu[which((x < 0))[1:10],54:75]),start=1700))
+x <- apply(mu[,54:75], 1, function(x) (max(x) - min(x)))
+round(c(mean = mean(x), quantile(x, c(0.025, 0.5, 0.975))))
+#hist(mu[,75] - mu[,54], breaks = 100)
 sink()

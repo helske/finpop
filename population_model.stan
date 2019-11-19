@@ -284,8 +284,8 @@ model {
 }
 
 generated quantities {
-  real<lower=1647, upper=1850> m_b = 1647 + 183 * mid_b_uc;
-  real<lower=1647, upper=1850> m_d = 1647 + 183 * mid_d_uc;
+  real<lower=1647, upper=1830> m_b = 1647 + 183 * mid_b_uc;
+  real<lower=1647, upper=1830> m_d = 1647 + 183 * mid_d_uc;
   real<lower=0> phi_mu = (mu[49] + births[50] - soldiers[50] - pi * mu[48]) / deaths[50];
   real<lower=0> phi_d = exp(log_phi_d);
 }
