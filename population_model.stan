@@ -1,3 +1,4 @@
+
 data {
   
   int<lower=0> n; // number of years
@@ -259,7 +260,7 @@ model {
   // means 0.5*ln and 0.75*ln for l1, 
   // 99% prior CIs approx [0.23,0.77] and [0.47, 0.94]
   lc ~ dirichlet([10, 5, 5]'); 
-  // 99% prior CI [0.012, 0.28] for growth rate
+  // 99% prior CI [0.005, 0.37] for growth rate
   r_b ~ gamma(2, 20);
   r_d ~ gamma(2, 20);
   mid_b_uc ~ beta(5, 5);
@@ -279,7 +280,7 @@ model {
   mu[2:49] ~ gamma(psi_mu * (mu[1:48] + births[2:49] - deaths[2:49] - soldiers[2:49]), psi_mu);
   mu[50] ~ gamma(psi_mu * pi * mu[48], psi_mu);
   mu[51:n] ~ gamma(psi_mu * (mu[50:(n-1)] + births[51:n] - deaths[51:n] - soldiers[51:n]), psi_mu);
-  sigma_c  ~ gamma(10, 0.0025);
+  sigma_c  ~ gamma(1, 0.0001); // prior mean 10,000, sd 10,000, 99% PI ~ [50, 52983]
   census ~ normal(mu[i_obs_census], sigma_c);
 }
 
@@ -289,3 +290,4 @@ generated quantities {
   real<lower=0> phi_mu = (mu[49] + births[50] - soldiers[50] - pi * mu[48]) / deaths[50];
   real<lower=0> phi_d = exp(log_phi_d);
 }
+
