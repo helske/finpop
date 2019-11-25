@@ -1,3 +1,4 @@
+
 data {
   
   int<lower=0> n; // number of years
@@ -289,3 +290,4 @@ generated quantities {
   real<lower=0> phi_mu = (mu[49] + births[50] - soldiers[50] - pi * mu[48]) / deaths[50];
   real<lower=0> phi_d = exp(log_phi_d);
 }
+
