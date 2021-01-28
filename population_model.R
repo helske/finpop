@@ -74,5 +74,5 @@ fit <- sampling(model, data = data,
                 chains = chains, cores = chains, warmup = warmup, 
                 iter = iter, refresh = 10, save_warmup = FALSE)
 
-saveRDS(fit, file="fit_population_model_04112019.rds")
+saveRDS(fit, file="fit_population_model.rds")
 check_hmc_diagnostics(fit)
